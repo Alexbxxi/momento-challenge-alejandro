@@ -1,66 +1,45 @@
-import { Agent, Operation, DateRange } from './types';
+import { Agent, Operation, DateRange, OperationType } from './types';
 import { readFromCSV } from './utils';
 
-export async function filterByDateRange(
-  dateRange?: DateRange,
-  operations?: Operation[],
-): Promise<Operation[]> {
-  const { startDate, endDate } = dateRange || {};
-  const filter = startDate && endDate;
-
-  if (!filter) {
-    return operations || [];
-  }
-
-  return (
-    operations?.filter((op) => {
-      const opDate = new Date(op.date);
-      return opDate >= startDate && opDate <= endDate;
-    }) || []
-  );
+function filterByDateRange(dateRange: DateRange | undefined, operations: Operation[]): Operation[] {
+  if (!dateRange) return operations;
+  const { startDate, endDate } = dateRange;
+  return operations.filter((op) => {
+    const opDate = new Date(op.date);
+    return opDate >= startDate && opDate <= endDate;
+  });
 }
 
-export async function getIssuance(dateRange?: DateRange): Promise<Operation[]> {
-  const operations = await readFromCSV('../resources/issuance.csv');
+async function getOperations(file: string, dateRange?: DateRange): Promise<Operation[]> {
+  const operations = await readFromCSV(file);
   return filterByDateRange(dateRange, operations);
 }
 
-export async function getClaims(dateRange?: DateRange): Promise<Operation[]> {
-  const operations = await readFromCSV('../resources/claims.csv');
-  return filterByDateRange(dateRange, operations);
+export function getIssuance(dateRange?: DateRange): Promise<Operation[]> {
+  return getOperations('../resources/issuance.csv', dateRange);
+}
+
+export function getClaims(dateRange?: DateRange): Promise<Operation[]> {
+  return getOperations('../resources/claims.csv', dateRange);
 }
 
 export function calculateIssuance(agent: Agent, operations: Operation[]): number {
-  let issuance = 0;
-  for (const op of operations) {
-    if (op.agent === agent.id) issuance += Number(op.amount);
-  }
-  return issuance;
+  return operations
+    .filter((op) => op.agent === agent.id)
+    .reduce((sum, op) => sum + Number(op.amount), 0);
 }
 
 export function calculateClaims(agent: Agent, operations: Operation[]): number {
-  let reserve = 0;
-  let adjust = 0;
-  let deductible = 0;
-  let recovery = 0;
+  const agentOps = operations.filter((op) => op.agent === agent.id);
+  const sum = (type: OperationType) =>
+    agentOps.filter((op) => op.operation === type).reduce((s, op) => s + Number(op.amount), 0);
 
-  for (const op of operations) {
-    switch (op.operation) {
-      case 'reserve':
-        if (op.agent === agent.id) reserve += Number(op.amount);
-        break;
-      case 'adjust':
-        if (op.agent === agent.id) adjust += Number(op.amount);
-        break;
-      case 'deductible':
-        if (op.agent === agent.id) deductible += Number(op.amount);
-        break;
-      case 'recovery':
-        if (op.agent === agent.id) recovery += Number(op.amount);
-        break;
-    }
-  }
-  return reserve + adjust - deductible - recovery;
+  return (
+    sum(OperationType.Reserve) +
+    sum(OperationType.Adjust) -
+    sum(OperationType.Deductible) -
+    sum(OperationType.Recovery)
+  );
 }
 
 export function calculateBonus(agent: Agent): number {
